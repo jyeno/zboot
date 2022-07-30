@@ -21,4 +21,41 @@ pub fn build(b: *std.build.Builder) void {
 
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&exe_tests.step);
+
+    const run_step = b.step("run", "Run project in QEMU");
+
+    const custom_bios = b.option([]const u8, "bios", "custom bios uefi path for QEMU");
+
+    const ovmf_code_bios = blk: {
+        if (custom_bios) |bios_path| break :blk bios_path;
+
+        const bios_possible_paths: []const []const u8 = &.{
+            "/usr/share/edk2-ovmf/OVMF_CODE.fd",
+            "/usr/share/edk2-ovmf/x64/OVMF_CODE.fd",
+        };
+        for (bios_possible_paths) |path| {
+            std.os.access(path, std.os.F_OK) catch continue;
+            break :blk path;
+        }
+        unreachable; // Cant find bios ovmf_code to run step, consider using -Dbios PATH"
+    };
+
+    const qemu_args = &.{
+        "qemu-system-x86_64",
+        "-enable-kvm",
+        "-bios",
+        ovmf_code_bios,
+        "-hdd",
+        "fat::rw:./fat",
+        "-display",
+        "sdl",
+        "-m",
+        "1024",
+        "-serial",
+        "stdio",
+    };
+
+    const run_qemu = b.addSystemCommand(qemu_args);
+    run_step.dependOn(&run_qemu.step);
+    run_qemu.step.dependOn(&exe.step);
 }
