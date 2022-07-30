@@ -3,24 +3,58 @@ const uefi = std.os.uefi;
 const BootEntry = @import("BootEntry.zig");
 const utils = @import("utils.zig");
 
+const L = std.unicode.utf8ToUtf16LeStringLiteral; // Like L"str" in C compilers
+const File = uefi.protocols.FileProtocol;
+
 const BootMenu = @This();
 
 current_entry: u8 = 0,
-entries: *const []BootEntry,
-allocator: std.mem.Allocator,
+entries: []BootEntry,
+arena: std.heap.ArenaAllocator,
 boot_services: *uefi.tables.BootServices,
 
-// TODO should read and generate entries
-pub fn init(allocator: std.mem.Allocator, boot_services: *uefi.tables.BootServices, entries: *const []BootEntry) BootMenu {
-    return .{ .allocator = allocator, .boot_services = boot_services, .entries = entries };
+pub fn init(allocator: std.mem.Allocator, boot_services: *uefi.tables.BootServices, entries_dir: *File) BootMenu {
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    var buf: [4096]u8 align(8) = undefined;
+    const entries = b: {
+        var entries_tmp = std.ArrayList(BootEntry).init(arena.allocator());
+        while (true) {
+            var bufsiz = buf.len;
+            entries_dir.read(&bufsiz, &buf).err() catch |e| {
+                utils.putsLiteral("yo man err:");
+                utils.puts(@errorName(e));
+                break;
+            };
+            if (bufsiz == 0) break;
+            const file_info = @ptrCast(*uefi.protocols.FileInfo, &buf);
+            const filename = std.mem.span(file_info.getFileName());
+            if (!std.mem.eql(u16, filename, L(".")) and !std.mem.eql(u16, filename, L(".."))) {
+                var entry_file: *File = undefined;
+                if (entries_dir.open(&entry_file, filename, File.efi_file_mode_read, File.efi_file_archive) == uefi.Status.Success) {
+                    const new_entry = BootEntry.fromFile(arena.allocator(), filename, entry_file.reader()) catch |e| {
+                        utils.putsLiteral("Failed to parse the following file:");
+                        utils.puts16(filename);
+                        utils.printf("\r\nDue to following error: {s}", .{@errorName(e)});
+                        continue;
+                    };
+                    entries_tmp.append(new_entry) catch {
+                        utils.putsLiteral("Out of memory. Entries may be missing");
+                    };
+                }
+            }
+        }
+        break :b entries_tmp.toOwnedSlice();
+    };
+
+    std.sort.sort(BootEntry, entries, {}, bootEntrySortReverse);
+
+    return .{ .arena = arena, .boot_services = boot_services, .entries = entries };
 }
 
 pub fn deinit(self: *BootMenu) void {
-    self.allocator.free(self.entries);
+    self.arena.deinit();
 }
 
-// planning, have a while waiting for the key entered
-// after that reset the screen and print the values again
 pub fn selectEntry(self: *BootMenu) !BootEntry {
     while (true) {
         self.displayEntries();
@@ -47,7 +81,7 @@ pub fn selectEntry(self: *BootMenu) !BootEntry {
             }
         } else {
             switch (input_key.unicode_char) {
-                13 => return self.entries.*[self.current_entry],
+                13 => return self.entries[self.current_entry],
                 else => {},
             }
         }
@@ -56,7 +90,7 @@ pub fn selectEntry(self: *BootMenu) !BootEntry {
 
 fn displayEntries(self: *const BootMenu) void {
     utils.clearScreen();
-    for (self.entries.*) |entry, index| {
+    for (self.entries) |entry, index| {
         if (index == self.current_entry) {
             utils.printf("> ", .{});
         } else {
@@ -64,4 +98,8 @@ fn displayEntries(self: *const BootMenu) void {
         }
         utils.printf("{s}\r\n", .{entry.title.?});
     }
+}
+
+pub fn bootEntrySortReverse(_: void, lhs: BootEntry, rhs: BootEntry) bool {
+    return BootEntry.order(lhs, rhs) == .gt;
 }

@@ -11,10 +11,6 @@ const BootEntry = @import("BootEntry.zig");
 const BootMenu = @import("BootMenu.zig");
 const utils = @import("utils.zig");
 
-fn bootEntrySortReverse(_: void, lhs: BootEntry, rhs: BootEntry) bool {
-    return BootEntry.order(lhs, rhs) == .gt;
-}
-
 pub fn main() usize {
     const boot_services = uefi.system_table.boot_services orelse return 1;
     utils.initOutput() catch return 1;
@@ -46,43 +42,10 @@ pub fn main() usize {
         return 1;
     }
 
+    var menu = BootMenu.init(uefi.pool_allocator, boot_services, entries_dir);
+    defer menu.deinit();
+
     utils.clearScreen();
-
-    var buf: [4096]u8 align(8) = undefined;
-    const entries = b: {
-        var entries_tmp = std.ArrayList(BootEntry).init(uefi.pool_allocator);
-        while (true) {
-            var bufsiz = buf.len;
-            entries_dir.read(&bufsiz, &buf).err() catch |e| {
-                utils.putsLiteral("yo man err:");
-                utils.puts(@errorName(e));
-                break;
-            };
-            if (bufsiz == 0) break;
-            const file_info = @ptrCast(*uefi.protocols.FileInfo, &buf);
-            const filename = mem.span(file_info.getFileName());
-            if (!mem.eql(u16, filename, L(".")) and !mem.eql(u16, filename, L(".."))) {
-                var entry_file: *File = undefined;
-                if (entries_dir.open(&entry_file, filename, File.efi_file_mode_read, File.efi_file_archive) == uefi.Status.Success) {
-                    const new_entry = BootEntry.fromFile(uefi.pool_allocator, filename, entry_file.reader()) catch |e| {
-                        utils.putsLiteral("Failed to parse the following file:");
-                        // _ = utils.printf("{s}\r\n", .{filename});
-                        utils.printf("\r\nDue to following error: {s}", .{@errorName(e)});
-                        continue;
-                    };
-                    entries_tmp.append(new_entry) catch {
-                        utils.putsLiteral("Out of memory. Entries may be missing");
-                    };
-                }
-            }
-        }
-        break :b entries_tmp.toOwnedSlice();
-    };
-    defer uefi.pool_allocator.free(entries);
-    std.sort.sort(BootEntry, entries, {}, bootEntrySortReverse);
-
-    var menu = BootMenu.init(uefi.pool_allocator, boot_services, &entries);
-    // defer menu.deinit() TODO
 
     // TODO: use this when implementing Linux memory requirements and co.
     //var img_file: *File = undefined;
@@ -129,8 +92,8 @@ pub fn main() usize {
         return 1;
     };
     defer uefi.pool_allocator.free(cmdline);
-    _ = utils.puts16(cmdline);
-    _ = utils.putsLiteral("");
+    utils.puts16(cmdline);
+    utils.putsLiteral("");
     next_image_meta.load_options = @ptrCast(*anyopaque, cmdline.ptr);
     next_image_meta.load_options_size = @intCast(u32, (cmdline.len + 1) * @sizeOf(u16));
     _ = boot_services.startImage(next_handle, null, null);
