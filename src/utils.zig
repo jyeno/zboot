@@ -33,6 +33,10 @@ pub fn putsLiteral(comptime msg: []const u8) void {
     _ = con_out.outputString(L(msg ++ "\r\n"));
 }
 
+pub fn moveCursor(column: usize, row: usize) void {
+    _ = con_out.setCursorPosition(column, row);
+}
+
 pub fn printf(comptime format: []const u8, args: anytype) void {
     var buf: [128]u8 = undefined;
     const ret = std.fmt.bufPrint(&buf, format, args) catch {

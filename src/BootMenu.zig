@@ -56,8 +56,12 @@ pub fn deinit(self: *BootMenu) void {
 }
 
 pub fn selectEntry(self: *BootMenu) !BootEntry {
+    utils.clearScreen();
+    for (self.entries) |entry| {
+        utils.printf("  {s}\r\n", .{entry.title.?});
+    }
     while (true) {
-        self.displayEntries();
+        self.updateLineSelection(true);
         const input_event = [_]uefi.Event{
             uefi.system_table.con_in.?.wait_for_key,
         };
@@ -66,6 +70,7 @@ pub fn selectEntry(self: *BootMenu) !BootEntry {
         var input_key: uefi.protocols.InputKey = undefined;
         uefi.system_table.con_in.?.readKeyStroke(&input_key).err() catch continue;
 
+        self.updateLineSelection(false);
         const keycode = input_key.scan_code;
         if (keycode == 1) { // up key
             if (self.current_entry == 0) {
@@ -88,15 +93,12 @@ pub fn selectEntry(self: *BootMenu) !BootEntry {
     }
 }
 
-fn displayEntries(self: *const BootMenu) void {
-    utils.clearScreen();
-    for (self.entries) |entry, index| {
-        if (index == self.current_entry) {
-            utils.printf("> ", .{});
-        } else {
-            utils.printf("  ", .{});
-        }
-        utils.printf("{s}\r\n", .{entry.title.?});
+fn updateLineSelection(self: *const BootMenu, is_selected: bool) void {
+    utils.moveCursor(0, self.current_entry);
+    if (is_selected) {
+        utils.printf(">", .{});
+    } else {
+        utils.printf(" ", .{});
     }
 }
 
