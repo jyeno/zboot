@@ -89,6 +89,12 @@ pub fn selectEntry(self: *BootMenu) !BootEntry {
                     };
                     return self.entries[self.current_entry];
                 },
+                '1'...'9' => {
+                    const num = @intCast(u8, input_key.unicode_char) - '1';
+                    if (num >= self.entries.len) continue;
+
+                    return self.entries[num];
+                },
                 else => {},
             }
         }
