@@ -31,8 +31,8 @@ pub fn build(b: *std.build.Builder) void {
     const qemu_args = &.{
         "qemu-system-x86_64",
         "-enable-kvm",
-        "-bios",
-        "OVMF.fd",
+        "-drive",
+        "if=pflash,format=raw,file=OVMF.fd",
         "-hdd",
         "fat::rw:./fat",
         "-display",
